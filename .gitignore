@@ -2,3 +2,6 @@ from_*_to_*
 dataset
 global_tuner
 tuner_results
+my_dir
+__pycache__
+*.pkl

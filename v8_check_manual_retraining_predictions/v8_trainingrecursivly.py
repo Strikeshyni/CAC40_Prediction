@@ -7,8 +7,8 @@ import pickle
 import sys
 import os
 sys.path.append('/home/abel/personnal_projects/CAC40_stock_prediction/')
-from model_v1 import model_v1
-from buying_simulation import buying_simulation
+from models.model_v1 import model_v1
+from real_time_simulation.buying_simulation import buying_simulation
 sys.path.append('/home/abel/personnal_projects/CAC40_stock_prediction/v8_check_manual_retraining_predictions/')
 
 # Parameters
