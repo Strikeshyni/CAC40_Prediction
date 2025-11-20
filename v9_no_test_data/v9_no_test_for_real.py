@@ -67,8 +67,8 @@ for nb_days_simulation in range(20, 0, -1):
 
         actual_prices.append(actual_price_dollar)
         predicted_prices.append(predicted_price_dollar)
-        #balance_value, stocks_owned, last_buying_value = placement(actual_price_dollar, predicted_last_day_dollar, predicted_price_dollar, stocks_owned, balance_value, last_buying_value)
-        balance_value, stocks_owned, last_buying_value = placement_v2(actual_price_dollar, predicted_price_dollar, stocks_owned, balance_value, last_buying_value, model_manager.scaler.inverse_transform(model_manager.y.reshape(-1, 1)).flatten())
+        balance_value, stocks_owned, last_buying_value = placement(actual_price_dollar, predicted_last_day_dollar, predicted_price_dollar, stocks_owned, balance_value, last_buying_value)
+        #balance_value, stocks_owned, last_buying_value = placement_v2(actual_price_dollar, predicted_price_dollar, stocks_owned, balance_value, last_buying_value, model_manager.scaler.inverse_transform(model_manager.y.reshape(-1, 1)).flatten())
         print(f"Balance: {balance_value}")
         print(f"Stocks owned: {stocks_owned}")            
     except ValueError as e:

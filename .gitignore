@@ -5,3 +5,4 @@ tuner_results
 my_dir
 __pycache__
 *.pkl
+venv/
