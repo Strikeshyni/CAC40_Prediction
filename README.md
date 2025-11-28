@@ -1,108 +1,105 @@
+# CAC40 Stock Prediction & Trading Simulation
 
-# CAC40 Stock Prediction
+This project is a comprehensive system for predicting stock prices of CAC40 companies and simulating trading strategies. It features a robust FastAPI backend, multiple state-of-the-art machine learning models, and a real-time simulation engine.
 
-This project aims to predict the next-day closing prices of stocks in the CAC40 index using machine learning and deep learning techniques. The workflow includes data collection, preprocessing, model training, hyperparameter tuning, simulation of trading strategies, and performance evaluation.
+## 🚀 Key Features
 
-## Table of Contents
-- [CAC40 Stock Prediction](#cac40-stock-prediction)
-  - [Table of Contents](#table-of-contents)
-  - [Project Overview](#project-overview)
-  - [Project Structure](#project-structure)
-  - [Installation \& Setup](#installation--setup)
-  - [Data Collection](#data-collection)
-  - [Model Training \& Prediction](#model-training--prediction)
-  - [Hyperparameter Tuning](#hyperparameter-tuning)
-  - [Trading Simulation](#trading-simulation)
-  - [Results \& Visualization](#results--visualization)
-  - [Customization](#customization)
-  - [License](#license)
+*   **Multi-Model Architecture**:
+    *   **Bi-LSTM (v2)**: Bidirectional LSTM with Dropout for capturing temporal dependencies (Default).
+    *   **Transformer**: Transformer Encoder with Multi-Head Attention.
+    *   **XGBoost**: Gradient boosting regressor with randomized search tuning.
+    *   **LSTM (v1)**: Legacy implementation.
+*   **FastAPI Backend**:
+    *   Asynchronous training and simulation jobs.
+    *   WebSocket support for real-time progress tracking.
+    *   RESTful endpoints for model management and predictions.
+*   **Advanced Simulation**:
+    *   **Historical Simulation**: Test strategies on past data with "time-travel" model training.
+    *   **Multiple Strategies**: Simple, Threshold, Percentage, Conservative, and Aggressive.
+    *   **Visualizations**: Detailed plots of price action, buy/sell signals, and portfolio evolution.
+*   **Benchmarking System**:
+    *   Compare all models side-by-side on recursive forecasting tasks.
 
----
-
-## Project Overview
-This repository provides a full pipeline to:
-- Download and preprocess historical CAC40 stock data
-- Train and tune deep learning models (LSTM) to predict next-day closing prices
-- Simulate trading strategies (buy/sell/hold) based on model predictions
-- Evaluate and visualize the results
-
-## Project Structure
+## 📂 Project Structure
 
 ```
 CAC40_stock_prediction/
-│   README.md
-│   requirements.txt
-│   __init__.py
-│
-├── dataset/                  # Downloaded and processed datasets
-├── v9_no_test_data/         # Scripts and outputs for main experiments
-├── web_scrapper/            # Data collection scripts
-│   └── scrapper.py
-├── model_v1.py              # Main model class (LSTM, training, prediction)
-├── buying_simulation.py     # Trading simulation logic
-└── ...                      # Other scripts and experiment folders
+├── api/                     # FastAPI application
+│   ├── main.py             # Server entry point
+│   ├── services.py         # Business logic (Training, Simulation)
+│   ├── models.py           # Pydantic data models
+│   └── ...
+├── models/                  # Machine Learning Model Definitions
+│   ├── model_lstm_v2.py    # Bi-LSTM (Current Standard)
+│   ├── model_transformer.py # Transformer Architecture
+│   ├── model_xgboost.py    # XGBoost Implementation
+│   └── ...
+├── real_time_simulation/    # Simulation Logic & Visualization
+│   ├── buy_simulation_v2.py
+│   └── visual_utils.py
+├── benchmark/               # Model Comparison Tools
+│   └── benchmark_system.py
+├── dataset/                 # Cached Stock Data (CSV)
+└── web_scrapper/           # Data Fetching Utilities
 ```
 
-## Installation & Setup
+## 🛠️ Installation
 
-1. **Clone the repository:**
-   ```bash
-   git clone <repo_url>
-   cd CAC40_stock_prediction
-   ```
+1.  **Clone the repository:**
+    ```bash
+    git clone <repo_url>
+    cd CAC40_stock_prediction
+    ```
 
-2. **Create a virtual environment:**
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
+2.  **Install dependencies:**
+    ```bash
+    pip install -r requirements.txt
+    pip install -r api/requirements_api.txt
+    ```
 
-3. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+## 🚦 Usage
 
-## Data Collection
+### 1. Running the API Server
+The core of the project is the API. Start it with:
 
-- Data is downloaded using the `yfinance` library and stored in the `dataset/` folder.
-- The script `web_scrapper/scrapper.py` fetches historical closing prices for CAC40 stocks.
-- Data is saved as CSV files with two columns: `Date` (index) and `Close`.
+```bash
+python -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8002
+```
 
-## Model Training & Prediction
+*   **Swagger UI**: `http://localhost:8002/docs`
+*   **API Documentation**: See `api/README_API.md` for detailed endpoint usage.
 
-- The main model is an LSTM neural network implemented in `model_v1.py`.
-- Data is preprocessed (scaling, sequence creation) before training.
-- The model predicts the next day's closing price based on a window of previous days (`time_step`).
-- Training, validation, and test splits are handled automatically.
-- Models and results are saved in experiment-specific folders.
+### 2. Running the Example Client
+Test the full pipeline (Training -> Prediction -> Simulation) using the example script:
 
-## Hyperparameter Tuning
+```bash
+python api/api_example_client.py
+```
 
-- Hyperparameter search is performed using `keras-tuner` (Hyperband algorithm).
-- Tunable parameters include LSTM units, dense units, activation functions, etc.
-- The best model is selected based on validation loss.
+### 3. Benchmarking Models
+To compare the performance of Bi-LSTM, Transformer, and XGBoost:
 
-## Trading Simulation
+```bash
+python3 benchmark/benchmark_system.py
+```
+This will generate a performance plot in the `benchmark/` directory.
 
-- The script `buying_simulation.py` simulates trading strategies using model predictions.
-- The `placement` function decides whether to buy, sell, or hold based on predicted and actual prices, current balance, and stocks owned.
-- The simulation tracks portfolio value, number of stocks, and actions over time.
+## 📊 Trading Strategies
 
-## Results & Visualization
+The simulation engine supports 5 distinct strategies:
+*   **Simple**: Buy if predicted > actual.
+*   **Threshold**: Buy if predicted > actual * (1 + threshold).
+*   **Percentage**: Based on % change.
+*   **Conservative**: High confidence requirements.
+*   **Aggressive**: Frequent trading with tight stop-losses.
 
-- Predictions and actual prices are exported to CSV for analysis.
-- Visualization scripts plot:
-  - Actual vs. predicted prices
-  - Trading actions and portfolio evolution
-  - Input sequences and model predictions for interpretability
+See `api/STRATEGIES_GUIDE.md` for details.
 
-## Customization
+## 🔧 Configuration
 
-- **Change stock:** Edit the `stock_name` variable in your scripts.
-- **Change time window:** Adjust the `time_step` parameter.
-- **Change simulation period:** Modify `from_date` and `to_date`.
-- **Add new strategies:** Extend `buying_simulation.py` or add new scripts.
+*   **Training**: Configurable epochs, batch size, and hyperparameter tuning (enabled/disabled).
+*   **Simulation**: Adjustable initial balance, risk ratios, and stop-loss/take-profit levels.
 
-## License
+## 📝 License
 
-This project is for educational and research purposes. Please check the license file for details.
+This project is for educational and research purposes.
