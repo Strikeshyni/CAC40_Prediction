@@ -2,7 +2,7 @@
 
 This project is a comprehensive system for predicting stock prices of CAC40 companies and simulating trading strategies. It features a robust FastAPI backend, multiple state-of-the-art machine learning models, and a real-time simulation engine.
 
-## 🚀 Key Features
+## Key Features
 
 *   **Multi-Model Architecture**:
     *   **Bi-LSTM (v2)**: Bidirectional LSTM with Dropout for capturing temporal dependencies (Default).
@@ -43,7 +43,7 @@ CAC40_stock_prediction/
 └── web_scrapper/           # Data Fetching Utilities
 ```
 
-## 🛠️ Installation
+## Installation
 
 1.  **Clone the repository:**
     ```bash
@@ -57,7 +57,18 @@ CAC40_stock_prediction/
     pip install -r api/requirements_api.txt
     ```
 
-## 🚦 Usage
+## Hardware Requirements & Performance Warning
+
+This project makes extensive use of Deep Learning models (LSTM, Transformers) which are computationally intensive.
+
+*   **GPU Recommended**: For optimal performance, especially during **simulations**, a CUDA-compatible GPU is highly recommended.
+*   **Simulation Intensity**: The "Historical Simulation" feature performs **time-travel training**, meaning the model is fine-tuned or retrained for *every single day* of the simulation period to prevent data leakage.
+*   **Without GPU**: If you are running on a CPU:
+    *   Keep simulation periods **very short** (e.g., 1-2 weeks).
+    *   Disable `global_tuning` in your configuration.
+    *   Expect significantly longer execution times.
+
+## Usage
 
 ### 1. Running the API Server
 The core of the project is the API. Start it with:
@@ -84,7 +95,7 @@ python3 benchmark/benchmark_system.py
 ```
 This will generate a performance plot in the `benchmark/` directory.
 
-## 📊 Trading Strategies
+## Trading Strategies
 
 The simulation engine supports 5 distinct strategies:
 *   **Simple**: Buy if predicted > actual.
@@ -95,11 +106,11 @@ The simulation engine supports 5 distinct strategies:
 
 See `api/STRATEGIES_GUIDE.md` for details.
 
-## 🔧 Configuration
+## Configuration
 
 *   **Training**: Configurable epochs, batch size, and hyperparameter tuning (enabled/disabled).
 *   **Simulation**: Adjustable initial balance, risk ratios, and stop-loss/take-profit levels.
 
-## 📝 License
+## License
 
 This project is for educational and research purposes.
