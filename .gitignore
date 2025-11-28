@@ -6,3 +6,6 @@ my_dir
 __pycache__
 *.pkl
 venv/
+benchmark_*/
+api_simulations/
+api_models/

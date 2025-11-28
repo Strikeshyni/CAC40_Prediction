@@ -7,7 +7,7 @@ import pickle
 import sys
 import os
 sys.path.append('/home/abel/personnal_projects/CAC40_stock_prediction/')
-from models.model_v1 import model_v1
+from models.model_lstm_v1 import model_v1
 from real_time_simulation.buying_simulation import buying_simulation
 from real_time_simulation.buy_simulation_v2 import placement, placement_v2
 

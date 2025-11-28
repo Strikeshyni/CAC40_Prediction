@@ -35,7 +35,7 @@ def get_closing_prices(from_date, to_date, stock_name=None):
         return closing_prices
 
     print(f"Collecting data from {from_date} to close of {to_date}\n")
-    data = yf.download(stock_name, start=from_date, end=to_date_plus_one)
+    data = yf.download(stock_name, start=from_date, end=to_date_plus_one, auto_adjust=True)
     # print(data.head())
     # print(data.index[-1])
     if data.empty:

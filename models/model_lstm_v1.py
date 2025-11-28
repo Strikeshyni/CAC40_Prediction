@@ -8,10 +8,12 @@ from keras.callbacks import EarlyStopping
 from web_scrapper.scrapper import get_closing_prices
 
 class model_v1:
-    def __init__(self, model_name, stock_name, from_date, to_date, train_size_percent=0.6, val_size_percent=0.2, time_step_train_split=100, global_tuning=False):
+    def __init__(self, model_name, stock_name, from_date, to_date, train_size_percent=0.6, val_size_percent=0.2, time_step_train_split=100, global_tuning=False, epochs=50, max_trials=10):
         self.model_name = model_name
         self.stock_name = stock_name
         self.global_tuning = global_tuning
+        self.epochs = epochs
+        self.max_trials = max_trials
         try:
             self.stock_data = get_closing_prices(from_date, to_date, stock_name)
         except ValueError as e:
@@ -79,14 +81,14 @@ class model_v1:
             tuner = kt.Hyperband(
                 build_model,
                 objective='val_loss',
-                max_epochs=20,
+                max_epochs=self.epochs,
                 factor=3,
                 directory="global_tuner" if self.global_tuning else f'{self.model_name}/tuner_results',
                 project_name=f'stock_prediction_{self.stock_name}'
             )
 
         # Perform the search
-        tuner.search(self.X_train, self.y_train, epochs=50, validation_data=(self.X_val, self.y_val))
+        tuner.search(self.X_train, self.y_train, epochs=self.epochs, validation_data=(self.X_val, self.y_val))
 
         # Get the best hyperparameters
         best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]

@@ -14,7 +14,7 @@ import numpy as np
 # Add project root to path
 sys.path.append('/home/abel/personnal_projects/CAC40_stock_prediction/')
 
-from models.model_v1 import model_v1
+from models.model_lstm_v2 import model_lstm_v2
 from api.models import (
     TrainingConfig, TrainingStatus, SimulationRequest, SimulationStatus,
     Transaction, TradingStrategy
@@ -186,11 +186,16 @@ async def train_model_async(job_id: str, config: TrainingConfig):
             job_manager.update_job(job_id, progress=0.2, 
                                   current_step="Downloading data from Yahoo Finance")
             
+            def training_progress_callback(p):
+                # Map 0..1 to 0.2..0.9
+                real_p = 0.2 + p * 0.7
+                job_manager.update_job(job_id, progress=real_p, current_step="Training model...")
+
             # Run training in thread pool to avoid blocking
             loop = asyncio.get_event_loop()
             model_instance = await loop.run_in_executor(
                 None,
-                lambda: model_v1(
+                lambda: model_lstm_v2(
                     model_name,
                     config.stock_name,
                     config.from_date,
@@ -198,7 +203,9 @@ async def train_model_async(job_id: str, config: TrainingConfig):
                     train_size_percent=config.train_size_percent,
                     val_size_percent=config.val_size_percent,
                     time_step_train_split=config.time_step,
-                    global_tuning=config.global_tuning
+                    global_tuning=config.global_tuning,
+                    verbose=False,
+                    progress_callback=training_progress_callback
                 )
             )
             
@@ -236,7 +243,7 @@ def make_predictions(job_id: str, n_days: int = 1) -> Dict:
     
     for day in range(1, n_days + 1):
         # Predict next day
-        next_prediction = model_instance.best_model.predict(current_sequence.reshape(1, -1))
+        next_prediction = model_instance.best_model.predict(current_sequence.reshape(1, -1, 1))
         predicted_price = model_instance.scaler.inverse_transform(next_prediction).flatten()[0]
         
         predictions.append({
@@ -333,11 +340,25 @@ async def run_historical_simulation(sim_id: str, request: SimulationRequest):
                     with open(model_file_path, 'rb') as file:
                         model_instance = pickle.load(file)
                 else:
+                    # Define progress callback for this iteration
+                    def sim_training_progress(p):
+                        # Global progress = (days_processed + p) / (nb_days + 1)
+                        # We allocate the full "step" to training for simplicity in visualization
+                        global_p = (days_processed + p) / (nb_days + 1)
+                        simulation_manager.update_simulation(
+                            sim_id,
+                            progress=global_p,
+                            current_date=training_end_date,
+                            days_processed=days_processed,
+                            current_balance=strategy_executor.balance,
+                            current_stocks=strategy_executor.stocks_owned
+                        )
+
                     # Train model for this period
                     loop = asyncio.get_event_loop()
                     model_instance = await loop.run_in_executor(
                         None,
-                        lambda: model_v1(
+                        lambda: model_lstm_v2(
                             model_name,
                             request.stock_name,
                             training_start_date,
@@ -345,7 +366,9 @@ async def run_historical_simulation(sim_id: str, request: SimulationRequest):
                             train_size_percent=0.8,
                             val_size_percent=0.2,
                             time_step_train_split=request.time_step,
-                            global_tuning=True
+                            global_tuning=True,
+                            verbose=False,
+                            progress_callback=sim_training_progress
                         )
                     )
                     
@@ -354,8 +377,8 @@ async def run_historical_simulation(sim_id: str, request: SimulationRequest):
                 
                 # Make predictions
                 all_for_next_day = np.append(model_instance.X[-1][1:], model_instance.y[-1])
-                predicted_last_day = model_instance.best_model.predict(model_instance.X[-1].reshape(1, -1))
-                next_day_predict = model_instance.best_model.predict(all_for_next_day.reshape(1, -1))
+                predicted_last_day = model_instance.best_model.predict(model_instance.X[-1].reshape(1, -1, 1))
+                next_day_predict = model_instance.best_model.predict(all_for_next_day.reshape(1, -1, 1))
                 
                 predicted_last_day_dollar = model_instance.scaler.inverse_transform(predicted_last_day).flatten()[0]
                 actual_price_dollar = model_instance.scaler.inverse_transform(model_instance.y[-1].reshape(-1, 1)).flatten()[0]

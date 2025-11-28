@@ -7,3 +7,4 @@ tensorflow
 keras
 keras-tuner
 jupyter
+xgboost

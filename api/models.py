@@ -21,6 +21,7 @@ class TransactionType(str, Enum):
     BUY = "buy"
     SELL = "sell"
     HOLD = "hold"
+
 class TrainingConfig(BaseModel):
     """Configuration for model training"""
     stock_name: str = Field(..., description="Stock symbol (e.g., ENGI.PA)")
