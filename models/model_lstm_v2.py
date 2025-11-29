@@ -9,18 +9,23 @@ from web_scrapper.scrapper import get_closing_prices
 from models.callbacks import CustomVerboseCallback
 
 class model_lstm_v2:
-    def __init__(self, model_name, stock_name, from_date, to_date, train_size_percent=0.6, val_size_percent=0.2, time_step_train_split=100, global_tuning=False, epochs=50, verbose=True, progress_callback=None):
+    def __init__(self, model_name, stock_name, from_date, to_date, train_size_percent=0.6, val_size_percent=0.2, time_step_train_split=100, global_tuning=False, epochs=50, verbose=True, progress_callback=None, hyperparameters=None):
         self.model_name = model_name
         self.stock_name = stock_name
         self.global_tuning = global_tuning
         self.epochs = epochs
         self.verbose = verbose
         self.progress_callback = progress_callback
+        self.hyperparameters = hyperparameters
+        
+        print(f"Loading data for {stock_name} from {from_date} to {to_date}...")
         try:
             self.stock_data = get_closing_prices(from_date, to_date, stock_name)
         except ValueError as e:
             print(e)
-            raise ValueError("Loaded data is same as previous day")
+            raise ValueError("No data on this day, CAC 40 was closed")
+        print(f"Data loaded successfully. {len(self.stock_data)} records found.")
+        
         self.scaled_data = None
         self.scaler = None
         self.scale_data(self.stock_data)
@@ -56,32 +61,40 @@ class model_lstm_v2:
         X_test = self.X[self.train_size + self.val_size:]
         y_test = self.y[self.train_size + self.val_size:]
         return X_train, y_train, X_val, y_val, X_test, y_test
+    def _build_model(self, hp):
+        model = Sequential()
+        # Tune the number of LSTM units
+        lstm_units = hp.Int('lstm_units', min_value=64, max_value=256, step=32)
+        dropout_rate = hp.Float('dropout_rate', min_value=0.0, max_value=0.5, step=0.1)
+        
+        model.add(Input(shape=(self.time_step, 1)))
+        # Bidirectional LSTM layer
+        model.add(Bidirectional(LSTM(units=lstm_units, return_sequences=True)))
+        model.add(Dropout(dropout_rate))
+        
+        model.add(Bidirectional(LSTM(units=lstm_units, return_sequences=False)))
+        model.add(Dropout(dropout_rate))
+        
+        model.add(Dense(units=64, activation='relu'))
+        model.add(Dense(units=1))
+
+        model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+        return model
 
     def tune_model(self):
-        def build_model(hp):
-            model = Sequential()
-            # Tune the number of LSTM units
-            lstm_units = hp.Int('lstm_units', min_value=64, max_value=256, step=32)
-            dropout_rate = hp.Float('dropout_rate', min_value=0.0, max_value=0.5, step=0.1)
-            
-            model.add(Input(shape=(self.time_step, 1)))
-            # Bidirectional LSTM layer
-            model.add(Bidirectional(LSTM(units=lstm_units, return_sequences=True)))
-            model.add(Dropout(dropout_rate))
-            
-            model.add(Bidirectional(LSTM(units=lstm_units, return_sequences=False)))
-            model.add(Dropout(dropout_rate))
-            
-            model.add(Dense(units=64, activation='relu'))
-            model.add(Dense(units=1))
+        if self.hyperparameters:
+            print("Using provided hyperparameters, skipping tuning.")
+            hp = kt.HyperParameters()
+            hp.values = self.hyperparameters
+            self.best_model = self._build_model(hp)
+            self.best_hyperparameters = self.hyperparameters
+            return
 
-            model.compile(optimizer='adam', loss='mse', metrics=['mae'])
-            return model
-
+        print("Starting hyperparameter tuning...")
         # Use Keras Tuner to find the best hyperparameters
         with tf.device('/GPU:0'):
             tuner = kt.Hyperband(
-                build_model,
+                self._build_model,
                 objective='val_loss',
                 max_epochs=self.epochs,
                 factor=3,
@@ -97,12 +110,21 @@ class model_lstm_v2:
             self.progress_callback(0.0)
             
         tuner.search(self.X_train, self.y_train, epochs=self.epochs, validation_data=(self.X_val, self.y_val), verbose=tuner_verbose)
+        
+        best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+        self.best_hyperparameters = best_hps.values
+        self.best_model = tuner.hypermodel.build(best_hps)
+        
+        # Note: The original code had a duplicate tuner.search call here which seems redundant or a mistake.
+        # I will remove it as we already searched and built the best model.
+        # tuner.search(self.X_train, self.y_train, epochs=self.epochs, validation_data=(self.X_val, self.y_val), verbose=tuner_verbose)
 
         if self.progress_callback:
             self.progress_callback(0.5)
 
         # Get the best hyperparameters
         best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+        print("Tuning completed.")
         if self.verbose:
             print("Best Hyperparameters:", best_hps.values)
 
@@ -112,21 +134,23 @@ class model_lstm_v2:
             print(self.best_model.summary())
     
     def train_model(self):
+        print("Starting model training...")
         callbacks = [EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)]
         
         # Add custom verbose/progress callback
         # Training is 50% to 100% of model progress
-        if not self.verbose or self.progress_callback:
-            callbacks.append(CustomVerboseCallback(
-                total_epochs=100, 
-                print_every=10, 
-                progress_callback=self.progress_callback,
-                start_progress=0.5,
-                end_progress=1.0
-            ))
+        # We force this callback even if verbose is False to get the "every 10 epochs" logs requested
+        callbacks.append(CustomVerboseCallback(
+            total_epochs=100, 
+            print_every=10, 
+            progress_callback=self.progress_callback,
+            start_progress=0.5,
+            end_progress=1.0
+        ))
             
         verbose_fit = 1 if self.verbose else 0
         self.best_model.fit(self.X_train, self.y_train, validation_data=(self.X_val, self.y_val), epochs=100, batch_size=32, callbacks=callbacks, verbose=verbose_fit)
+        print("Model training completed.")
 
     def predict(self, data):
         # data shape should be (samples, time_step)

@@ -6,6 +6,7 @@ import sys
 import pickle
 import uuid
 import asyncio
+import json
 from datetime import datetime, timedelta
 from typing import Dict, Optional, List
 import pandas as pd
@@ -20,6 +21,7 @@ from api.models import (
     Transaction, TradingStrategy
 )
 from api.utils import get_closing_prices, get_strategy_executor
+from api.plotting import generate_simulation_chart
 
 
 class TrainingJobManager:
@@ -100,6 +102,8 @@ class SimulationJobManager:
             total_days=total_days,
             current_balance=request.initial_balance,
             current_stocks=0.0,
+            current_stock_value=0.0,
+            current_price=0.0,
             total_transactions=0,
             start_time=datetime.now()
         )
@@ -170,18 +174,26 @@ async def train_model_async(job_id: str, config: TrainingConfig):
         model_file_path = f'{output_dir}{config.stock_name}_{config.from_date}_{config.to_date}_model.pkl'
         
         # Check if model already exists
+        model_loaded = False
         if os.path.exists(model_file_path):
             job_manager.update_job(job_id, progress=0.3, 
                                   current_step="Loading existing model")
             
-            with open(model_file_path, 'rb') as file:
-                model_instance = pickle.load(file)
+            try:
+                with open(model_file_path, 'rb') as file:
+                    model_instance = pickle.load(file)
                 
-            job_manager.update_job(job_id, progress=1.0, 
-                                  current_step="Model loaded successfully",
-                                  status="completed",
-                                  model_path=model_file_path)
-        else:
+                job_manager.update_job(job_id, progress=1.0, 
+                                      current_step="Model loaded successfully",
+                                      status="completed",
+                                      model_path=model_file_path)
+                model_loaded = True
+            except (EOFError, pickle.UnpicklingError) as e:
+                print(f"Corrupted model file found at {model_file_path}. Deleting and retraining. Error: {e}")
+                os.remove(model_file_path)
+                model_loaded = False
+
+        if not model_loaded:
             # Train new model
             job_manager.update_job(job_id, progress=0.2, 
                                   current_step="Downloading data from Yahoo Finance")
@@ -190,6 +202,20 @@ async def train_model_async(job_id: str, config: TrainingConfig):
                 # Map 0..1 to 0.2..0.9
                 real_p = 0.2 + p * 0.7
                 job_manager.update_job(job_id, progress=real_p, current_step="Training model...")
+
+            # Load hyperparameters if requested
+            hyperparameters = None
+            if config.use_stored_hyperparameters:
+                try:
+                    hp_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "hyperparameters/best_hyperparameters.json")
+                    if os.path.exists(hp_path):
+                        with open(hp_path, "r") as f:
+                            all_params = json.load(f)
+                            if config.stock_name in all_params and "model_lstm_v2" in all_params[config.stock_name]:
+                                hyperparameters = all_params[config.stock_name]["model_lstm_v2"]
+                                job_manager.update_job(job_id, current_step="Loaded stored hyperparameters")
+                except Exception as e:
+                    print(f"Could not load hyperparameters: {e}")
 
             # Run training in thread pool to avoid blocking
             loop = asyncio.get_event_loop()
@@ -205,12 +231,16 @@ async def train_model_async(job_id: str, config: TrainingConfig):
                     time_step_train_split=config.time_step,
                     global_tuning=config.global_tuning,
                     verbose=False,
-                    progress_callback=training_progress_callback
+                    progress_callback=training_progress_callback,
+                    hyperparameters=hyperparameters
                 )
             )
             
             job_manager.update_job(job_id, progress=0.9, 
                                   current_step="Saving model")
+            
+            # Remove callback before pickling to avoid AttributeError
+            model_instance.progress_callback = None
             
             # Save model
             with open(model_file_path, 'wb') as file:
@@ -260,7 +290,11 @@ def make_predictions(job_id: str, n_days: int = 1) -> Dict:
         model_instance.y[-1].reshape(-1, 1)
     ).flatten()[0]
     
-    last_date = model_instance.stock_data.index[-1].strftime('%Y-%m-%d')
+    last_idx = model_instance.stock_data.index[-1]
+    if isinstance(last_idx, str):
+        last_date = last_idx
+    else:
+        last_date = last_idx.strftime('%Y-%m-%d')
     
     return {
         "predictions": predictions,
@@ -354,6 +388,19 @@ async def run_historical_simulation(sim_id: str, request: SimulationRequest):
                             current_stocks=strategy_executor.stocks_owned
                         )
 
+                    # Load hyperparameters if requested
+                    hyperparameters = None
+                    if request.use_stored_hyperparameters:
+                        try:
+                            hp_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "hyperparameters/best_hyperparameters.json")
+                            if os.path.exists(hp_path):
+                                with open(hp_path, "r") as f:
+                                    all_params = json.load(f)
+                                    if request.stock_name in all_params and "model_lstm_v2" in all_params[request.stock_name]:
+                                        hyperparameters = all_params[request.stock_name]["model_lstm_v2"]
+                        except Exception as e:
+                            print(f"Could not load hyperparameters: {e}")
+
                     # Train model for this period
                     loop = asyncio.get_event_loop()
                     model_instance = await loop.run_in_executor(
@@ -368,9 +415,13 @@ async def run_historical_simulation(sim_id: str, request: SimulationRequest):
                             time_step_train_split=request.time_step,
                             global_tuning=True,
                             verbose=False,
-                            progress_callback=sim_training_progress
+                            progress_callback=sim_training_progress,
+                            hyperparameters=hyperparameters
                         )
                     )
+                    
+                    # Remove callback before pickling to avoid AttributeError
+                    model_instance.progress_callback = None
                     
                     with open(model_file_path, 'wb') as file:
                         pickle.dump(model_instance, file)
@@ -416,6 +467,15 @@ async def run_historical_simulation(sim_id: str, request: SimulationRequest):
                 }
                 simulation_manager.add_daily_result(sim_id, daily_result)
                 
+                # Update simulation status with latest values
+                simulation_manager.update_simulation(
+                    sim_id,
+                    current_balance=float(strategy_executor.balance),
+                    current_stocks=float(strategy_executor.stocks_owned),
+                    current_stock_value=float(strategy_executor.stocks_owned * actual_price_dollar),
+                    current_price=float(actual_price_dollar)
+                )
+                
             except Exception as e:
                 # Log error but continue simulation
                 error_result = {
@@ -428,11 +488,20 @@ async def run_historical_simulation(sim_id: str, request: SimulationRequest):
         daily_results = simulation_manager.get_daily_results(sim_id)
         transactions = simulation_manager.get_transactions(sim_id)
         
-        if daily_results and "actual_price" in daily_results[-1]:
-            final_actual_price = daily_results[-1]["actual_price"]
-            final_balance = strategy_executor.balance + strategy_executor.stocks_owned * final_actual_price
-        else:
-            final_balance = strategy_executor.balance
+        final_stocks_owned = strategy_executor.stocks_owned
+        final_stock_value = 0.0
+        final_balance = strategy_executor.balance
+
+        # Find last valid price from daily results (skipping errors)
+        final_actual_price = 0.0
+        for result in reversed(daily_results):
+            if "actual_price" in result:
+                final_actual_price = result["actual_price"]
+                break
+        
+        if final_actual_price > 0:
+            final_stock_value = final_stocks_owned * final_actual_price
+            final_balance = strategy_executor.balance + final_stock_value
         
         benefit = final_balance - request.initial_balance
         benefit_percentage = (benefit / request.initial_balance) * 100
@@ -441,25 +510,33 @@ async def run_historical_simulation(sim_id: str, request: SimulationRequest):
         buy_trades = sum(1 for t in transactions if t.transaction_type.value == "buy")
         sell_trades = sum(1 for t in transactions if t.transaction_type.value == "sell")
         
+        # Generate simulation chart
+        plot_path = generate_simulation_chart(sim_id, daily_results, request.stock_name)
+        
         # Mark simulation as completed
         simulation_manager.update_simulation(
             sim_id,
             status="completed",
             progress=1.0,
             current_balance=strategy_executor.balance,
-            current_stocks=strategy_executor.stocks_owned
+            current_stocks=strategy_executor.stocks_owned,
+            current_stock_value=final_stock_value,
+            plot_path=plot_path
         )
         
         return {
             "sim_id": sim_id,
             "status": "completed",
             "stock_name": request.stock_name,
+            "plot_path": plot_path,
             "simulation_period": {
                 "from": request.from_date,
                 "to": request.to_date
             },
             "initial_balance": request.initial_balance,
             "final_balance": final_balance,
+            "final_stocks_owned": final_stocks_owned,
+            "final_stock_value": final_stock_value,
             "benefit": benefit,
             "benefit_percentage": benefit_percentage,
             "strategy_used": request.strategy,

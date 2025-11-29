@@ -4,11 +4,12 @@ Stock prediction API for CAC40 stocks
 """
 from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from contextlib import asynccontextmanager
 import asyncio
 from typing import List
 import json
+import os
 
 from api.models import (
     TrainingConfig, TrainingResponse, TrainingStatus,
@@ -199,6 +200,8 @@ async def predict(request: PredictionRequest):
             last_actual_date=result["last_actual_date"]
         )
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -310,14 +313,40 @@ async def get_simulation_results(sim_id: str):
     daily_results = simulation_manager.get_daily_results(sim_id)
     transactions = simulation_manager.get_transactions(sim_id)
     
-    # Calculate final balance from last daily result
-    if daily_results and "portfolio_value" in daily_results[-1]:
-        final_balance = daily_results[-1]["portfolio_value"]
-    else:
-        final_balance = sim.current_balance + sim.current_stocks * daily_results[-1].get("actual_price", 0)
+    # Calculate final balance from last VALID daily result
+    final_balance = sim.current_balance
+    final_stock_value = 0.0
     
-    benefit = final_balance - daily_results[0].get("portfolio_value", sim.current_balance) if daily_results else 0
-    initial_balance = daily_results[0].get("portfolio_value", sim.current_balance) if daily_results else sim.current_balance
+    # Find last valid result with portfolio value
+    last_valid_result = None
+    for result in reversed(daily_results):
+        if "portfolio_value" in result:
+            last_valid_result = result
+            break
+            
+    if last_valid_result:
+        if "actual_price" in last_valid_result:
+            final_stock_value = sim.current_stocks * last_valid_result["actual_price"]
+    else:
+        # Fallback: try to find last price
+        last_price = 0.0
+        for result in reversed(daily_results):
+            if "actual_price" in result:
+                last_price = result["actual_price"]
+                break
+        final_stock_value = sim.current_stocks * last_price
+        final_balance = sim.current_balance
+    
+    # Get initial balance from first valid result or simulation start
+    initial_balance = 0.0
+    for result in daily_results:
+        if "portfolio_value" in result:
+            initial_balance = result["portfolio_value"]
+            break
+    if initial_balance == 0:
+        initial_balance = sim.current_balance  # Fallback
+        
+    benefit = final_balance + final_stock_value - initial_balance
     benefit_percentage = (benefit / initial_balance * 100) if initial_balance > 0 else 0
     
     # Calculate trade statistics
@@ -347,6 +376,8 @@ async def get_simulation_results(sim_id: str):
         simulation_period={"from": "", "to": ""},  # Would need to store this
         initial_balance=initial_balance,
         final_balance=final_balance,
+        final_stocks_owned=sim.current_stocks,
+        final_stock_value=final_stock_value,
         benefit=benefit,
         benefit_percentage=benefit_percentage,
         strategy_used="simple",  # Would need to store this
@@ -395,6 +426,21 @@ async def delete_simulation(sim_id: str):
     return {"message": f"Simulation {sim_id} deleted successfully"}
 
 
+@app.get("/api/simulation/{sim_id}/plot")
+async def get_simulation_plot(sim_id: str):
+    """
+    Get the plot image for a completed simulation
+    """
+    sim = simulation_manager.get_simulation(sim_id)
+    if not sim:
+        raise HTTPException(status_code=404, detail=f"Simulation {sim_id} not found")
+    
+    if not sim.plot_path or not os.path.exists(sim.plot_path):
+        raise HTTPException(status_code=404, detail="Plot not found for this simulation")
+        
+    return FileResponse(sim.plot_path, media_type="image/png")
+
+
 @app.websocket("/ws/simulation/{sim_id}")
 async def websocket_simulation_updates(websocket: WebSocket, sim_id: str):
     """
@@ -415,6 +461,8 @@ async def websocket_simulation_updates(websocket: WebSocket, sim_id: str):
                     "total_days": sim.total_days,
                     "current_balance": sim.current_balance,
                     "current_stocks": sim.current_stocks,
+                    "current_stock_value": sim.current_stock_value,
+                    "current_price": sim.current_price,
                     "total_transactions": sim.total_transactions,
                     "error": sim.error
                 })

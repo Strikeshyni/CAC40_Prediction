@@ -18,7 +18,7 @@ class model_v1:
             self.stock_data = get_closing_prices(from_date, to_date, stock_name)
         except ValueError as e:
             print(e)
-            raise ValueError("Loaded data is same as previous day")
+            raise ValueError("No data on this day, CAC 40 was closed")
         self.scaled_data = None
         self.scaler = None
         self.scale_data(self.stock_data)

@@ -9,3 +9,4 @@ venv/
 benchmark_*/
 api_simulations/
 api_models/
+api_simulations_plots/

@@ -29,7 +29,7 @@ def get_closing_prices(from_date, to_date, stock_name=None):
 
     if os.path.exists(file_path):
         print(f"Data already exists at {file_path}. Loading from file.\n")
-        closing_prices = pd.read_csv(file_path)
+        closing_prices = pd.read_csv(file_path, parse_dates=['Date'])
         closing_prices.set_index('Date', inplace=True)
         #print(closing_prices.head())
         return closing_prices

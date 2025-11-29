@@ -7,16 +7,21 @@ import joblib
 import os
 
 class model_xgboost:
-    def __init__(self, model_name, stock_name, from_date, to_date, train_size_percent=0.6, val_size_percent=0.2, time_step_train_split=100, global_tuning=False, n_iter=10):
+    def __init__(self, model_name, stock_name, from_date, to_date, train_size_percent=0.6, val_size_percent=0.2, time_step_train_split=100, global_tuning=False, n_iter=10, hyperparameters=None):
         self.model_name = model_name
         self.stock_name = stock_name
         self.global_tuning = global_tuning
         self.n_iter = n_iter
+        self.hyperparameters = hyperparameters
+        
+        print(f"Loading data for {stock_name} from {from_date} to {to_date}...")
         try:
             self.stock_data = get_closing_prices(from_date, to_date, stock_name)
         except ValueError as e:
             print(e)
-            raise ValueError("Loaded data is same as previous day")
+            raise ValueError("No data on this day, CAC 40 was closed")
+        print(f"Data loaded successfully. {len(self.stock_data)} records found.")
+        
         self.scaled_data = None
         self.scaler = None
         self.scale_data(self.stock_data)
@@ -54,6 +59,13 @@ class model_xgboost:
         return X_train, y_train, X_val, y_val, X_test, y_test
 
     def tune_model(self):
+        if self.hyperparameters:
+            print("Using provided hyperparameters, skipping tuning.")
+            self.best_params = self.hyperparameters
+            self.best_model = xgb.XGBRegressor(**self.best_params, objective='reg:squarederror', tree_method='hist', device='cuda' if self.check_gpu() else 'cpu')
+            return
+
+        print("Starting hyperparameter tuning...")
         # XGBoost Hyperparameter tuning using RandomizedSearchCV
         param_grid = {
             'n_estimators': [100, 200, 300],
@@ -81,6 +93,7 @@ class model_xgboost:
         random_search.fit(self.X_train, self.y_train)
         
         self.best_params = random_search.best_params_
+        print("Tuning completed.")
         print("Best Hyperparameters:", self.best_params)
         
         self.best_model = random_search.best_estimator_
@@ -94,6 +107,7 @@ class model_xgboost:
             return False
 
     def train_model(self):
+        print("Starting model training...")
         # In XGBoost with sklearn API, fit is already training. 
         # But we can retrain on train+val if we want, or just keep the best estimator from CV.
         # Here we will retrain on train set with early stopping using validation set
@@ -104,7 +118,7 @@ class model_xgboost:
             eval_set=[(self.X_val, self.y_val)],
             verbose=False
         )
-        print("XGBoost training complete.")
+        print("Model training completed.")
 
     def predict(self, data):
         # data shape should be (samples, time_step)

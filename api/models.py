@@ -31,6 +31,7 @@ class TrainingConfig(BaseModel):
     val_size_percent: float = Field(0.2, ge=0.05, le=0.9, description="Validation data percentage")
     time_step: int = Field(300, ge=10, le=1000, description="Time steps for sequence prediction")
     global_tuning: bool = Field(True, description="Enable hyperparameter tuning")
+    use_stored_hyperparameters: bool = Field(False, description="Use pre-calculated hyperparameters if available")
     
     @validator('from_date', 'to_date')
     def validate_date_format(cls, v):
@@ -110,6 +111,7 @@ class SimulationRequest(BaseModel):
     min_profit_percentage: Optional[float] = Field(None, ge=0, le=100, description="Minimum profit % before selling")
     max_loss_percentage: Optional[float] = Field(None, ge=0, le=100, description="Maximum loss % before stop-loss")
     confidence_threshold: Optional[float] = Field(None, ge=0, le=1, description="Minimum prediction confidence (0-1)")
+    use_stored_hyperparameters: bool = Field(False, description="Use pre-calculated hyperparameters if available")
     
     @validator('from_date', 'to_date')
     def validate_date_format(cls, v):
@@ -118,6 +120,7 @@ class SimulationRequest(BaseModel):
             return v
         except ValueError:
             raise ValueError('Date must be in YYYY-MM-DD format')
+
 
 
 class Transaction(BaseModel):
@@ -145,10 +148,13 @@ class SimulationStatus(BaseModel):
     total_days: int
     current_balance: float
     current_stocks: float
-    total_transactions: int
+    current_stock_value: Optional[float] = None
+    current_price: Optional[float] = None
+    total_transactions: int = 0
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     error: Optional[str] = None
+    plot_path: Optional[str] = None
 
 
 class SimulationResponse(BaseModel):
@@ -159,6 +165,8 @@ class SimulationResponse(BaseModel):
     simulation_period: Dict[str, str]  # {"from": "...", "to": "..."}
     initial_balance: float
     final_balance: Optional[float] = None
+    final_stocks_owned: Optional[float] = None
+    final_stock_value: Optional[float] = None
     benefit: Optional[float] = None
     benefit_percentage: Optional[float] = None
     strategy_used: TradingStrategy
