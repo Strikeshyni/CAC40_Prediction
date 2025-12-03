@@ -61,6 +61,7 @@ class model_lstm_v2:
         X_test = self.X[self.train_size + self.val_size:]
         y_test = self.y[self.train_size + self.val_size:]
         return X_train, y_train, X_val, y_val, X_test, y_test
+    
     def _build_model(self, hp):
         model = Sequential()
         # Tune the number of LSTM units

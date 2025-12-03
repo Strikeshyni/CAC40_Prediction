@@ -26,7 +26,7 @@ def tune_and_save():
             from_date=from_date,
             to_date=to_date,
             global_tuning=True,
-            epochs=30,
+            epochs=50,
             verbose=True
         )
         hyperparameters[stock_name]["model_lstm_v2"] = lstm.best_hyperparameters

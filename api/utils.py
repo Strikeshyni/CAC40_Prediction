@@ -5,7 +5,7 @@ import os
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict, Any, List
 from api.models import TradingStrategy, TransactionType, Transaction
 
 
@@ -81,12 +81,13 @@ def format_date(date_str: str) -> str:
 class TradingStrategyExecutor:
     """Base class for trading strategy execution"""
     
-    def __init__(self, initial_balance: float, **kwargs):
+    def __init__(self, initial_balance: float, strategy_name: str = "default", **kwargs):
         self.balance = initial_balance
         self.stocks_owned = 0.0
         self.last_buy_price = None
         self.transactions = []
         self.transaction_counter = 0
+        self.strategy_name = strategy_name
         self.kwargs = kwargs
     
     def execute_trade(
@@ -95,9 +96,9 @@ class TradingStrategyExecutor:
         actual_price: float, 
         predicted_price: float,
         predicted_last_day: float
-    ) -> Tuple[TransactionType, Optional[Transaction]]:
+    ) -> Tuple[TransactionType, Optional[Transaction], Dict[str, Any]]:
         """
-        Execute trade based on strategy. Returns (action, transaction)
+        Execute trade based on strategy. Returns (action, transaction, decision_details)
         Must be implemented by subclasses
         """
         raise NotImplementedError
@@ -121,6 +122,7 @@ class TradingStrategyExecutor:
         
         transaction = Transaction(
             transaction_id=self.transaction_counter,
+            strategy=self.strategy_name,
             date=date,
             transaction_type=transaction_type,
             stock_price=price,
@@ -150,8 +152,19 @@ class SimpleStrategy(TradingStrategyExecutor):
         actual_price: float, 
         predicted_price: float,
         predicted_last_day: float
-    ) -> Tuple[TransactionType, Optional[Transaction]]:
+    ) -> Tuple[TransactionType, Optional[Transaction], Dict[str, Any]]:
         
+        diff = predicted_price - actual_price
+        diff_pct = (diff / actual_price) * 100 if actual_price > 0 else 0
+        
+        decision_details = {
+            "actual_price": actual_price,
+            "predicted_price": predicted_price,
+            "diff": diff,
+            "diff_pct": diff_pct,
+            "threshold": 0.0
+        }
+
         # Buy signal: predicted price is higher than actual
         if predicted_price > actual_price and self.balance > 0:
             quantity = self.balance / actual_price
@@ -164,10 +177,10 @@ class SimpleStrategy(TradingStrategyExecutor):
                 transaction_type=TransactionType.BUY,
                 price=actual_price,
                 quantity=quantity,
-                reason=f"Predicted increase: {predicted_price:.2f} > {actual_price:.2f}",
+                reason=f"Predicted increase: {predicted_price:.2f} > {actual_price:.2f} (Diff: {diff:.2f}€, {diff_pct:.2f}%)",
                 predicted_price=predicted_price
             )
-            return TransactionType.BUY, transaction
+            return TransactionType.BUY, transaction, decision_details
         
         # Sell signal: predicted price is lower than actual and we own stocks
         elif predicted_price < actual_price and self.stocks_owned > 0:
@@ -185,12 +198,12 @@ class SimpleStrategy(TradingStrategyExecutor):
                 transaction_type=TransactionType.SELL,
                 price=actual_price,
                 quantity=quantity,
-                reason=f"Predicted decrease: {predicted_price:.2f} < {actual_price:.2f}{profit_loss}",
+                reason=f"Predicted decrease: {predicted_price:.2f} < {actual_price:.2f} (Diff: {diff:.2f}€, {diff_pct:.2f}%){profit_loss}",
                 predicted_price=predicted_price
             )
-            return TransactionType.SELL, transaction
+            return TransactionType.SELL, transaction, decision_details
         
-        return TransactionType.HOLD, None
+        return TransactionType.HOLD, None, decision_details
 
 
 class ThresholdStrategy(TradingStrategyExecutor):
@@ -202,12 +215,20 @@ class ThresholdStrategy(TradingStrategyExecutor):
         actual_price: float, 
         predicted_price: float,
         predicted_last_day: float
-    ) -> Tuple[TransactionType, Optional[Transaction]]:
+    ) -> Tuple[TransactionType, Optional[Transaction], Dict[str, Any]]:
         
         buy_threshold = self.kwargs.get('buy_threshold', 0.5)
         sell_threshold = self.kwargs.get('sell_threshold', 0.5)
         
         price_diff = predicted_price - actual_price
+        
+        decision_details = {
+            "actual_price": actual_price,
+            "predicted_price": predicted_price,
+            "diff": price_diff,
+            "buy_threshold": buy_threshold,
+            "sell_threshold": sell_threshold
+        }
         
         # Buy signal: predicted price exceeds buy threshold
         if price_diff > buy_threshold and self.balance > 0:
@@ -221,10 +242,10 @@ class ThresholdStrategy(TradingStrategyExecutor):
                 transaction_type=TransactionType.BUY,
                 price=actual_price,
                 quantity=quantity,
-                reason=f"Strong buy signal: +{price_diff:.2f}€ (threshold: {buy_threshold}€)",
+                reason=f"Strong buy signal: +{price_diff:.2f}€ > {buy_threshold}€ threshold",
                 predicted_price=predicted_price
             )
-            return TransactionType.BUY, transaction
+            return TransactionType.BUY, transaction, decision_details
         
         # Sell signal: predicted price below sell threshold
         elif price_diff < -sell_threshold and self.stocks_owned > 0:
@@ -242,12 +263,12 @@ class ThresholdStrategy(TradingStrategyExecutor):
                 transaction_type=TransactionType.SELL,
                 price=actual_price,
                 quantity=quantity,
-                reason=f"Strong sell signal: {price_diff:.2f}€ (threshold: -{sell_threshold}€){profit_loss}",
+                reason=f"Strong sell signal: {price_diff:.2f}€ < -{sell_threshold}€ threshold{profit_loss}",
                 predicted_price=predicted_price
             )
-            return TransactionType.SELL, transaction
+            return TransactionType.SELL, transaction, decision_details
         
-        return TransactionType.HOLD, None
+        return TransactionType.HOLD, None, decision_details
 
 
 class PercentageStrategy(TradingStrategyExecutor):
@@ -259,12 +280,20 @@ class PercentageStrategy(TradingStrategyExecutor):
         actual_price: float, 
         predicted_price: float,
         predicted_last_day: float
-    ) -> Tuple[TransactionType, Optional[Transaction]]:
+    ) -> Tuple[TransactionType, Optional[Transaction], Dict[str, Any]]:
         
         buy_threshold = self.kwargs.get('buy_threshold', 1.0)  # 1% by default
         sell_threshold = self.kwargs.get('sell_threshold', 1.0)
         
         predicted_change_pct = ((predicted_price - actual_price) / actual_price) * 100
+        
+        decision_details = {
+            "actual_price": actual_price,
+            "predicted_price": predicted_price,
+            "predicted_change_pct": predicted_change_pct,
+            "buy_threshold": buy_threshold,
+            "sell_threshold": sell_threshold
+        }
         
         # Buy signal
         if predicted_change_pct > buy_threshold and self.balance > 0:
@@ -278,10 +307,10 @@ class PercentageStrategy(TradingStrategyExecutor):
                 transaction_type=TransactionType.BUY,
                 price=actual_price,
                 quantity=quantity,
-                reason=f"Predicted increase: +{predicted_change_pct:.2f}% (threshold: {buy_threshold}%)",
+                reason=f"Predicted increase: +{predicted_change_pct:.2f}% > {buy_threshold}% threshold",
                 predicted_price=predicted_price
             )
-            return TransactionType.BUY, transaction
+            return TransactionType.BUY, transaction, decision_details
         
         # Sell signal
         elif predicted_change_pct < -sell_threshold and self.stocks_owned > 0:
@@ -299,12 +328,12 @@ class PercentageStrategy(TradingStrategyExecutor):
                 transaction_type=TransactionType.SELL,
                 price=actual_price,
                 quantity=quantity,
-                reason=f"Predicted decrease: {predicted_change_pct:.2f}% (threshold: -{sell_threshold}%){profit_loss}",
+                reason=f"Predicted decrease: {predicted_change_pct:.2f}% < -{sell_threshold}% threshold{profit_loss}",
                 predicted_price=predicted_price
             )
-            return TransactionType.SELL, transaction
+            return TransactionType.SELL, transaction, decision_details
         
-        return TransactionType.HOLD, None
+        return TransactionType.HOLD, None, decision_details
 
 
 class ConservativeStrategy(TradingStrategyExecutor):
@@ -316,12 +345,25 @@ class ConservativeStrategy(TradingStrategyExecutor):
         actual_price: float, 
         predicted_price: float,
         predicted_last_day: float
-    ) -> Tuple[TransactionType, Optional[Transaction]]:
+    ) -> Tuple[TransactionType, Optional[Transaction], Dict[str, Any]]:
         
         min_profit_pct = self.kwargs.get('min_profit_percentage', 5.0)  # 5% minimum profit
         buy_threshold = self.kwargs.get('buy_threshold', 2.0)  # 2% predicted increase
         
         predicted_change_pct = ((predicted_price - actual_price) / actual_price) * 100
+        
+        current_profit_pct = 0.0
+        if self.last_buy_price:
+            current_profit_pct = ((actual_price - self.last_buy_price) / self.last_buy_price) * 100
+            
+        decision_details = {
+            "actual_price": actual_price,
+            "predicted_price": predicted_price,
+            "predicted_change_pct": predicted_change_pct,
+            "buy_threshold": buy_threshold,
+            "min_profit_pct": min_profit_pct,
+            "current_profit_pct": current_profit_pct
+        }
         
         # Buy signal: strong predicted increase
         if predicted_change_pct > buy_threshold and self.balance > 0:
@@ -335,17 +377,13 @@ class ConservativeStrategy(TradingStrategyExecutor):
                 transaction_type=TransactionType.BUY,
                 price=actual_price,
                 quantity=quantity,
-                reason=f"Conservative buy: +{predicted_change_pct:.2f}% predicted (threshold: {buy_threshold}%)",
+                reason=f"Conservative buy: +{predicted_change_pct:.2f}% predicted > {buy_threshold}% threshold",
                 predicted_price=predicted_price
             )
-            return TransactionType.BUY, transaction
+            return TransactionType.BUY, transaction, decision_details
         
         # Sell signal: either profit target reached or predicted decrease
         elif self.stocks_owned > 0:
-            current_profit_pct = 0
-            if self.last_buy_price:
-                current_profit_pct = ((actual_price - self.last_buy_price) / self.last_buy_price) * 100
-            
             # Sell if profit target reached
             if current_profit_pct >= min_profit_pct:
                 quantity = self.stocks_owned
@@ -357,10 +395,10 @@ class ConservativeStrategy(TradingStrategyExecutor):
                     transaction_type=TransactionType.SELL,
                     price=actual_price,
                     quantity=quantity,
-                    reason=f"Profit target reached: {current_profit_pct:.2f}% (target: {min_profit_pct}%)",
+                    reason=f"Profit target reached: {current_profit_pct:.2f}% >= {min_profit_pct}% target",
                     predicted_price=predicted_price
                 )
-                return TransactionType.SELL, transaction
+                return TransactionType.SELL, transaction, decision_details
             
             # Sell if strong predicted decrease
             elif predicted_change_pct < -1.0:
@@ -376,9 +414,9 @@ class ConservativeStrategy(TradingStrategyExecutor):
                     reason=f"Predicted decrease: {predicted_change_pct:.2f}% (profit: {current_profit_pct:.2f}%)",
                     predicted_price=predicted_price
                 )
-                return TransactionType.SELL, transaction
+                return TransactionType.SELL, transaction, decision_details
         
-        return TransactionType.HOLD, None
+        return TransactionType.HOLD, None, decision_details
 
 
 class AggressiveStrategy(TradingStrategyExecutor):
@@ -390,12 +428,25 @@ class AggressiveStrategy(TradingStrategyExecutor):
         actual_price: float, 
         predicted_price: float,
         predicted_last_day: float
-    ) -> Tuple[TransactionType, Optional[Transaction]]:
+    ) -> Tuple[TransactionType, Optional[Transaction], Dict[str, Any]]:
         
         buy_threshold = self.kwargs.get('buy_threshold', 0.1)  # 0.1% predicted increase
         max_loss_pct = self.kwargs.get('max_loss_percentage', 5.0)  # 5% max loss
         
         predicted_change_pct = ((predicted_price - actual_price) / actual_price) * 100
+        
+        current_loss_pct = 0.0
+        if self.last_buy_price:
+            current_loss_pct = ((actual_price - self.last_buy_price) / self.last_buy_price) * 100
+            
+        decision_details = {
+            "actual_price": actual_price,
+            "predicted_price": predicted_price,
+            "predicted_change_pct": predicted_change_pct,
+            "buy_threshold": buy_threshold,
+            "max_loss_pct": max_loss_pct,
+            "current_loss_pct": current_loss_pct
+        }
         
         # Buy signal: any predicted increase
         if predicted_change_pct > buy_threshold and self.balance > 0:
@@ -409,17 +460,13 @@ class AggressiveStrategy(TradingStrategyExecutor):
                 transaction_type=TransactionType.BUY,
                 price=actual_price,
                 quantity=quantity,
-                reason=f"Aggressive buy: +{predicted_change_pct:.2f}% predicted",
+                reason=f"Aggressive buy: +{predicted_change_pct:.2f}% predicted > {buy_threshold}%",
                 predicted_price=predicted_price
             )
-            return TransactionType.BUY, transaction
+            return TransactionType.BUY, transaction, decision_details
         
         # Sell signal: predicted decrease or stop-loss
         elif self.stocks_owned > 0:
-            current_loss_pct = 0
-            if self.last_buy_price:
-                current_loss_pct = ((actual_price - self.last_buy_price) / self.last_buy_price) * 100
-            
             # Stop-loss triggered
             if current_loss_pct <= -max_loss_pct:
                 quantity = self.stocks_owned
@@ -434,7 +481,7 @@ class AggressiveStrategy(TradingStrategyExecutor):
                     reason=f"STOP-LOSS: {current_loss_pct:.2f}% loss (limit: -{max_loss_pct}%)",
                     predicted_price=predicted_price
                 )
-                return TransactionType.SELL, transaction
+                return TransactionType.SELL, transaction, decision_details
             
             # Sell on predicted decrease
             elif predicted_change_pct < 0:
@@ -447,12 +494,12 @@ class AggressiveStrategy(TradingStrategyExecutor):
                     transaction_type=TransactionType.SELL,
                     price=actual_price,
                     quantity=quantity,
-                    reason=f"Predicted decrease: {predicted_change_pct:.2f}% (current P/L: {current_loss_pct:.2f}%)",
+                    reason=f"Predicted decrease: {predicted_change_pct:.2f}%",
                     predicted_price=predicted_price
                 )
-                return TransactionType.SELL, transaction
+                return TransactionType.SELL, transaction, decision_details
         
-        return TransactionType.HOLD, None
+        return TransactionType.HOLD, None, decision_details
 
 
 def get_strategy_executor(strategy: TradingStrategy, initial_balance: float, **kwargs) -> TradingStrategyExecutor:

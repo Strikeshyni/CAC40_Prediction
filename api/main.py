@@ -313,43 +313,135 @@ async def get_simulation_results(sim_id: str):
     daily_results = simulation_manager.get_daily_results(sim_id)
     transactions = simulation_manager.get_transactions(sim_id)
     
-    # Calculate final balance from last VALID daily result
+    # Initialize strategies results container
+    strategies_results = {}
+    
+    # Check if we have multi-strategy results
+    has_strategies = False
+    if daily_results and "strategies" in daily_results[0]:
+        has_strategies = True
+        # Get list of strategies from the first result
+        strategy_names = list(daily_results[0]["strategies"].keys())
+        
+        for strat_name in strategy_names:
+            # Calculate stats for this strategy
+            strat_final_balance = 0.0
+            strat_final_stocks = 0.0
+            strat_final_stock_value = 0.0
+            strat_initial_balance = 0.0
+            
+            # Find last valid result for this strategy
+            last_valid_strat = None
+            for result in reversed(daily_results):
+                if "strategies" in result and strat_name in result["strategies"]:
+                    s_res = result["strategies"][strat_name]
+                    if "portfolio_value" in s_res:
+                        last_valid_strat = s_res
+                        # Also need actual price from parent
+                        last_price = result.get("actual_price", 0.0)
+                        break
+            
+            if last_valid_strat:
+                strat_final_balance = last_valid_strat.get("balance", 0.0)
+                strat_final_stocks = last_valid_strat.get("stocks", 0.0)
+                strat_final_stock_value = strat_final_stocks * last_price
+            
+            # Get initial balance
+            for result in daily_results:
+                if "strategies" in result and strat_name in result["strategies"]:
+                    s_res = result["strategies"][strat_name]
+                    if "portfolio_value" in s_res:
+                        strat_initial_balance = s_res["portfolio_value"]
+                        break
+            
+            strat_benefit = strat_final_balance + strat_final_stock_value - strat_initial_balance
+            strat_benefit_pct = (strat_benefit / strat_initial_balance * 100) if strat_initial_balance > 0 else 0
+            
+            # Filter transactions for this strategy
+            strat_txs = [t for t in transactions if getattr(t, "strategy", "default") == strat_name]
+            strat_buy = sum(1 for t in strat_txs if t.transaction_type.value == "buy")
+            strat_sell = sum(1 for t in strat_txs if t.transaction_type.value == "sell")
+            
+            strat_wins = 0
+            strat_losses = 0
+            for t in strat_txs:
+                if t.transaction_type.value == "sell" and "Profit:" in t.reason:
+                    try:
+                        profit_str = t.reason.split("Profit:")[1].strip().split("%")[0].strip()
+                        profit_pct = float(profit_str.replace("(", "").replace(")", ""))
+                        if profit_pct > 0:
+                            strat_wins += 1
+                        else:
+                            strat_losses += 1
+                    except:
+                        pass
+            
+            strategies_results[strat_name] = {
+                "final_balance": strat_final_balance,
+                "final_stocks_owned": strat_final_stocks,
+                "final_stock_value": strat_final_stock_value,
+                "benefit": strat_benefit,
+                "benefit_percentage": strat_benefit_pct,
+                "total_trades": len(strat_txs),
+                "buy_trades": strat_buy,
+                "sell_trades": strat_sell,
+                "winning_trades": strat_wins,
+                "losing_trades": strat_losses,
+                "win_rate": (strat_wins / strat_sell * 100) if strat_sell > 0 else 0
+            }
+
+    # Calculate final balance from last VALID daily result (Legacy/Primary support)
     final_balance = sim.current_balance
     final_stock_value = 0.0
     
-    # Find last valid result with portfolio value
-    last_valid_result = None
-    for result in reversed(daily_results):
-        if "portfolio_value" in result:
-            last_valid_result = result
-            break
-            
-    if last_valid_result:
-        if "actual_price" in last_valid_result:
-            final_stock_value = sim.current_stocks * last_valid_result["actual_price"]
+    # If we have strategies, use the first one for top-level stats
+    if has_strategies and strategies_results:
+        first_strat = list(strategies_results.keys())[0]
+        res = strategies_results[first_strat]
+        final_balance = res["final_balance"]
+        final_stock_value = res["final_stock_value"]
+        sim.current_stocks = res["final_stocks_owned"] # Update for display
+        initial_balance = 10000.0 # Default or derived
+        # Try to find initial balance from results
+        for result in daily_results:
+             if "strategies" in result and first_strat in result["strategies"]:
+                 initial_balance = result["strategies"][first_strat].get("portfolio_value", 10000.0)
+                 break
     else:
-        # Fallback: try to find last price
-        last_price = 0.0
+        # Legacy single strategy logic
+        # Find last valid result with portfolio value
+        last_valid_result = None
         for result in reversed(daily_results):
-            if "actual_price" in result:
-                last_price = result["actual_price"]
+            if "portfolio_value" in result:
+                last_valid_result = result
                 break
-        final_stock_value = sim.current_stocks * last_price
-        final_balance = sim.current_balance
-    
-    # Get initial balance from first valid result or simulation start
-    initial_balance = 0.0
-    for result in daily_results:
-        if "portfolio_value" in result:
-            initial_balance = result["portfolio_value"]
-            break
-    if initial_balance == 0:
-        initial_balance = sim.current_balance  # Fallback
+                
+        if last_valid_result:
+            if "actual_price" in last_valid_result:
+                final_stock_value = sim.current_stocks * last_valid_result["actual_price"]
+        else:
+            # Fallback: try to find last price
+            last_price = 0.0
+            for result in reversed(daily_results):
+                if "actual_price" in result:
+                    last_price = result["actual_price"]
+                    break
+            final_stock_value = sim.current_stocks * last_price
+            final_balance = sim.current_balance
+        
+        # Get initial balance from first valid result or simulation start
+        initial_balance = 0.0
+        for result in daily_results:
+            if "portfolio_value" in result:
+                initial_balance = result["portfolio_value"]
+                break
+        if initial_balance == 0:
+            initial_balance = sim.current_balance  # Fallback
         
     benefit = final_balance + final_stock_value - initial_balance
     benefit_percentage = (benefit / initial_balance * 100) if initial_balance > 0 else 0
     
-    # Calculate trade statistics
+    # Calculate trade statistics (Global or Primary)
     buy_trades = sum(1 for t in transactions if t.transaction_type.value == "buy")
     sell_trades = sum(1 for t in transactions if t.transaction_type.value == "sell")
     
@@ -380,7 +472,8 @@ async def get_simulation_results(sim_id: str):
         final_stock_value=final_stock_value,
         benefit=benefit,
         benefit_percentage=benefit_percentage,
-        strategy_used="simple",  # Would need to store this
+        strategy_used="multi" if has_strategies else "simple",
+        strategies_results=strategies_results if has_strategies else None,
         daily_results=daily_results,
         transactions=transactions,
         summary={
@@ -426,19 +519,15 @@ async def delete_simulation(sim_id: str):
     return {"message": f"Simulation {sim_id} deleted successfully"}
 
 
-@app.get("/api/simulation/{sim_id}/plot")
+@app.get("/api/simulate/{sim_id}/plot")
 async def get_simulation_plot(sim_id: str):
     """
-    Get the plot image for a completed simulation
+    Get the simulation plot image
     """
-    sim = simulation_manager.get_simulation(sim_id)
-    if not sim:
-        raise HTTPException(status_code=404, detail=f"Simulation {sim_id} not found")
-    
-    if not sim.plot_path or not os.path.exists(sim.plot_path):
-        raise HTTPException(status_code=404, detail="Plot not found for this simulation")
-        
-    return FileResponse(sim.plot_path, media_type="image/png")
+    plot_path = f"api_simulations_plots/{sim_id}.png"
+    if not os.path.exists(plot_path):
+        raise HTTPException(status_code=404, detail="Plot not found")
+    return FileResponse(plot_path)
 
 
 @app.websocket("/ws/simulation/{sim_id}")

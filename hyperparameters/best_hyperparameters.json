@@ -28,5 +28,35 @@
             "learning_rate": 0.01,
             "colsample_bytree": 0.9
         }
+    },
+    "AIR.PA": {
+        "model_lstm_v2": {
+            "lstm_units": 224,
+            "dropout_rate": 0.0,
+            "tuner/epochs": 2,
+            "tuner/initial_epoch": 0,
+            "tuner/bracket": 3,
+            "tuner/round": 0
+        }
+    },
+    "SAN.PA": {
+        "model_lstm_v2": {
+            "lstm_units": 160,
+            "dropout_rate": 0.2,
+            "tuner/epochs": 2,
+            "tuner/initial_epoch": 0,
+            "tuner/bracket": 3,
+            "tuner/round": 0
+        }
+    },
+    "BNP.PA": {
+        "model_lstm_v2": {
+            "lstm_units": 192,
+            "dropout_rate": 0.1,
+            "tuner/epochs": 2,
+            "tuner/initial_epoch": 0,
+            "tuner/bracket": 3,
+            "tuner/round": 0
+        }
     }
 }

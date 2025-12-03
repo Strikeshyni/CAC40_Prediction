@@ -2,7 +2,12 @@
 
 API REST complète pour l'entraînement de modèles ML de prédiction de prix d'actions et la simulation de stratégies de trading avec 5 stratégies différentes.
 
-## 🆕 Nouveautés v2.0
+## 🆕 Nouveautés v2.1
+
+### ⚡ Optimisation & Multi-Stratégies
+- **Multi-Stratégies** : Lancez et comparez plusieurs stratégies simultanément dans une seule simulation
+- **Fréquence de Ré-entraînement** : Paramètre `retrain_interval` pour accélérer les simulations (ex: ré-entraîner tous les 5 jours au lieu de chaque jour)
+- **Explicabilité** : Détails précis des décisions dans les transactions (ex: "Predicted +2.5% > Threshold 1.0%")
 
 ### 5 Stratégies de Trading
 - **Simple** : Achat/vente basique selon les prédictions
@@ -21,6 +26,7 @@ API REST complète pour l'entraînement de modèles ML de prédiction de prix d'
 - `GET /api/simulate/{sim_id}/status` - Statut de simulation
 - `GET /api/simulate/{sim_id}/transactions` - Historique des transactions
 - `GET /api/simulate/{sim_id}/results` - Résultats complets
+- `GET /api/simulate/{sim_id}/plot` - Graphique de la simulation (PNG)
 - `GET /api/simulate/jobs` - Liste toutes les simulations
 - `WS /ws/simulation/{sim_id}` - WebSocket pour progression en temps réel
 
@@ -169,8 +175,11 @@ Content-Type: application/json
   "time_step": 300,
   "nb_years_data": 10,
   
-  // Stratégie et paramètres (NOUVEAU)
-  "strategy": "conservative",           // simple, threshold, percentage, conservative, aggressive
+  // Stratégies et Optimisation (NOUVEAU v2.1)
+  "strategies": ["simple", "conservative"], // Liste des stratégies à exécuter simultanément
+  "retrain_interval": 5,                // Ré-entraîner le modèle tous les N jours (1 = quotidien)
+  
+  // Paramètres de seuils
   "buy_threshold": 2.0,                 // Seuil d'achat (dépend de la stratégie)
   "sell_threshold": 1.5,                // Seuil de vente
   "min_profit_percentage": 5.0,         // Profit minimum avant vente (conservative)
@@ -189,7 +198,7 @@ Content-Type: application/json
     "to": "2024-12-31"
   },
   "initial_balance": 100.0,
-  "strategy_used": "conservative"
+  "strategy_used": "multi"
 }
 ```
 
@@ -300,27 +309,33 @@ GET /api/simulate/{sim_id}/results
 }
 ```
 
-### 10. Lister toutes les simulations (NOUVEAU)
+### 10. Récupérer le graphique de simulation (NOUVEAU)
+```bash
+GET /api/simulate/{sim_id}/plot
+```
+Retourne une image PNG montrant l'évolution du prix, des prédictions et de la valeur du portefeuille.
+
+### 11. Lister toutes les simulations (NOUVEAU)
 ```bash
 GET /api/simulate/jobs
 ```
 
-### 11. Supprimer une simulation (NOUVEAU)
+### 12. Supprimer une simulation (NOUVEAU)
 ```bash
 DELETE /api/simulate/{sim_id}
 ```
 
-### 12. Lister tous les entraînements
+### 13. Lister tous les entraînements
 ```bash
 GET /api/train/jobs
 ```
 
-### 13. Supprimer un entraînement
+### 14. Supprimer un entraînement
 ```bash
 DELETE /api/train/{job_id}
 ```
 
-### 14. WebSocket pour simulations (NOUVEAU)
+### 15. WebSocket pour simulations (NOUVEAU)
 ```javascript
 const ws = new WebSocket('ws://localhost:8002/ws/simulation/{sim_id}');
 
@@ -447,55 +462,50 @@ if status['status'] == 'completed':
         print(f"  → {t['reason']}")
 ```
 
-### Exemple 3 : Comparer Plusieurs Stratégies (NOUVEAU)
+### Exemple 3 : Comparer Plusieurs Stratégies (Optimisé v2.1)
 ```python
 import requests
 import time
 
 API_URL = "http://localhost:8002"
 
-strategies = [
-    {"name": "Simple", "config": {"strategy": "simple"}},
-    {"name": "Threshold 1€", "config": {"strategy": "threshold", "buy_threshold": 1.0, "sell_threshold": 1.0}},
-    {"name": "Conservative 5%", "config": {"strategy": "conservative", "min_profit_percentage": 5.0}},
-    {"name": "Aggressive 3%", "config": {"strategy": "aggressive", "max_loss_percentage": 3.0}},
-]
-
-results = []
-
-for strat in strategies:
-    config = {
-        "stock_name": "ENGI.PA",
-        "from_date": "2024-01-01",
-        "to_date": "2024-11-20",
-        "initial_balance": 100.0,
-        **strat["config"]
-    }
+# Configuration multi-stratégies avec ré-entraînement optimisé
+config = {
+    "stock_name": "ENGI.PA",
+    "from_date": "2024-01-01",
+    "to_date": "2024-11-20",
+    "initial_balance": 100.0,
+    "strategies": ["simple", "threshold", "conservative", "aggressive"],
+    "retrain_interval": 5,  # Ré-entraîner tous les 5 jours (plus rapide)
     
-    response = requests.post(f"{API_URL}/api/simulate", json=config)
-    sim_id = response.json()["sim_id"]
-    
-    # Attendre la fin
-    while True:
-        status = requests.get(f"{API_URL}/api/simulate/{sim_id}/status").json()
-        if status["status"] in ["completed", "failed"]:
-            break
-        time.sleep(2)
-    
-    if status["status"] == "completed":
-        result = requests.get(f"{API_URL}/api/simulate/{sim_id}/results").json()
-        results.append({
-            "strategy": strat["name"],
-            "benefit_pct": result["benefit_percentage"],
-            "trades": result["summary"]["total_trades"],
-            "win_rate": result["summary"]["win_rate"]
-        })
+    # Paramètres globaux pour toutes les stratégies
+    "buy_threshold": 1.5,
+    "sell_threshold": 1.5,
+    "min_profit_percentage": 5.0,
+    "max_loss_percentage": 3.0
+}
 
-# Afficher comparaison
-print(f"\n{'Stratégie':<20s} | {'Profit':<12s} | {'Trades':<8s} | {'Win Rate':<10s}")
-print("-" * 60)
-for r in sorted(results, key=lambda x: x['benefit_pct'], reverse=True):
-    print(f"{r['strategy']:<20s} | {r['benefit_pct']:+6.2f}%      | {r['trades']:6d} | {r['win_rate']:7.1f}%")
+print("Lancement de la simulation multi-stratégies...")
+response = requests.post(f"{API_URL}/api/simulate", json=config)
+sim_id = response.json()["sim_id"]
+
+# Attendre la fin
+while True:
+    status = requests.get(f"{API_URL}/api/simulate/{sim_id}/status").json()
+    print(f"Progress: {status['progress']*100:.1f}%")
+    if status["status"] in ["completed", "failed"]:
+        break
+    time.sleep(2)
+
+if status["status"] == "completed":
+    result = requests.get(f"{API_URL}/api/simulate/{sim_id}/results").json()
+    strategies_results = result.get("strategies_results", {})
+    
+    print(f"\n{'Stratégie':<20s} | {'Profit':<12s} | {'Trades':<8s} | {'Win Rate':<10s}")
+    print("-" * 60)
+    
+    for name, res in strategies_results.items():
+        print(f"{name:<20s} | {res['benefit_percentage']:+6.2f}%      | {res['total_trades']:6d} | {res['win_rate']:7.1f}%")
 ```
 
 ### Exemple cURL
@@ -592,7 +602,9 @@ L'API gère plusieurs types d'erreurs :
 - **nb_years_data** : Années de données historiques pour entraînement (défaut: 10)
 
 #### Paramètres de stratégie (NOUVEAU)
-- **strategy** : Type de stratégie (`simple`, `threshold`, `percentage`, `conservative`, `aggressive`)
+- **strategies** : Liste des stratégies à tester (`["simple", "conservative"]`)
+- **retrain_interval** : Fréquence de ré-entraînement du modèle en jours (défaut: 1). Augmenter pour accélérer la simulation.
+- **strategy** : (Déprécié) Type de stratégie unique
 - **buy_threshold** : Seuil d'achat (signification varie selon la stratégie)
 - **sell_threshold** : Seuil de vente
 - **min_profit_percentage** : Profit minimum avant vente (stratégie `conservative`)
@@ -748,6 +760,6 @@ curl http://localhost:8002/api/simulate/{sim_id}/status | jq
 
 ---
 
-**Version:** 2.0  
-**Dernière mise à jour:** 2025-05-20  
+**Version:** 2.1  
+**Dernière mise à jour:** 2025-12-01  
 **Auteur:** CAC40 Stock Prediction Team

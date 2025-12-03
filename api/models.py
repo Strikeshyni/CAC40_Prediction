@@ -105,7 +105,10 @@ class SimulationRequest(BaseModel):
     nb_years_data: int = Field(10, ge=1, le=20, description="Years of historical data to use")
     
     # Trading strategy parameters
-    strategy: TradingStrategy = Field(TradingStrategy.SIMPLE, description="Trading strategy to use")
+    strategy: Optional[TradingStrategy] = Field(None, description="Primary trading strategy (deprecated, use strategies)")
+    strategies: List[TradingStrategy] = Field(default_factory=lambda: [TradingStrategy.SIMPLE], description="List of strategies to compare")
+    retrain_interval: int = Field(1, ge=1, le=365, description="Retrain model every N days")
+    
     buy_threshold: Optional[float] = Field(None, ge=0, description="Minimum difference to trigger buy (euros or %)")
     sell_threshold: Optional[float] = Field(None, ge=0, description="Minimum difference to trigger sell (euros or %)")
     min_profit_percentage: Optional[float] = Field(None, ge=0, le=100, description="Minimum profit % before selling")
@@ -126,6 +129,7 @@ class SimulationRequest(BaseModel):
 class Transaction(BaseModel):
     """Detailed transaction record"""
     transaction_id: int
+    strategy: str = "default"
     date: str
     transaction_type: TransactionType
     stock_price: float
@@ -169,7 +173,8 @@ class SimulationResponse(BaseModel):
     final_stock_value: Optional[float] = None
     benefit: Optional[float] = None
     benefit_percentage: Optional[float] = None
-    strategy_used: TradingStrategy
+    strategy_used: Optional[str] = None
+    strategies_results: Optional[Dict[str, Dict[str, Any]]] = None
     daily_results: Optional[List[Dict[str, Any]]] = None
     transactions: Optional[List[Transaction]] = None
     summary: Optional[Dict[str, Any]] = None
