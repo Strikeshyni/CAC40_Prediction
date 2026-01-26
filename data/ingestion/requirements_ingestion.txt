@@ -1,0 +1,67 @@
+# ============================================
+# CAC40_Prediction - Data Ingestion Layer
+# Requirements for ETL Pipeline
+# ============================================
+
+# === Core Dependencies ===
+pandas>=2.1.0
+numpy>=1.24.0
+pyarrow>=14.0.0
+python-dateutil>=2.8.2
+pytz>=2024.1
+
+# === HTTP & Async ===
+httpx>=0.26.0
+aiohttp>=3.9.0
+requests>=2.31.0
+tenacity>=8.2.0
+
+# === Market Data ===
+yfinance>=0.2.36
+pandas-datareader>=0.10.0
+polygon-api-client>=1.12.0
+alpha_vantage>=2.3.1
+
+# === News Feeds ===
+feedparser>=6.0.10
+beautifulsoup4>=4.12.0
+lxml>=5.1.0
+scrapy>=2.11.0
+playwright>=1.41.0
+newspaper3k>=0.2.8
+dateparser>=1.2.0
+langdetect>=1.0.9
+tiktoken>=0.5.0
+
+# === Corporate Filings ===
+sec-edgar-downloader>=5.0.2
+edgartools>=1.0.0
+python-xbrl>=1.1.1
+pdfplumber>=0.10.0
+
+# === Macro Indicators ===
+fredapi>=0.5.1
+sdmx1>=2.12.0
+ecbdata>=0.0.5
+wbgapi>=1.0.12
+
+# === Scheduling & Utilities ===
+schedule>=1.2.0
+tqdm>=4.66.0
+pyyaml>=6.0.1
+python-dotenv>=1.0.0
+
+# === Development & Testing ===
+pytest>=7.4.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
+
+# ============================================
+# Optional: Advanced XBRL Parsing (requires manual install)
+# pip install arelle-release>=2.20.0
+# ============================================
+
+# ============================================
+# Post-install commands:
+# playwright install chromium
+# ============================================
